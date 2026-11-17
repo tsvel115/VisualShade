@@ -166,6 +166,8 @@ end
 
 -- FREECAM
 local fcOn = false
+local rmbDown = false
+local prevBehavior = Enum.MouseBehavior.Default
 local pos, yaw, pitch = Vector3.zero, 0, 0
 local up, down = false, false
 local speeds = {0.5, 1, 2, 4}
@@ -203,14 +205,21 @@ local function setFreecam(on)
     lookInput = nil
     if on then
         pos = cam.CFrame.Position
+        prevBehavior = UIS.MouseBehavior
         pitch, yaw = cam.CFrame:ToOrientation()
         cam.CameraType = Enum.CameraType.Scriptable
         if hrp then hrp.Anchored = true end
     else
-        up, down = false, false
+        up, down, rmbDown = false, false, false
+        UIS.MouseBehavior = prevBehavior
         if hrp then hrp.Anchored = false end
-        cam.CameraType = Enum.CameraType.Custom
-        if hum then cam.CameraSubject = hum end
+        local function restore()
+            cam = workspace.CurrentCamera
+            cam.CameraType = Enum.CameraType.Custom
+            if hum then cam.CameraSubject = hum end
+        end
+        restore()
+        task.delay(0.1, function() if not fcOn then restore() end end)
     end
 end
 
@@ -230,22 +239,35 @@ dnBtn.InputEnded:Connect(function() down = false end)
 
 -- Putar kamera: klik kanan + geser (PC) / geser setengah layar kanan (HP)
 UIS.InputChanged:Connect(function(input)
-    if not fcOn then return end
-    local mouseLook = input.UserInputType == Enum.UserInputType.MouseMovement
-        and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
-    local touchLook = lookInput ~= nil and input == lookInput
-    if mouseLook or touchLook then
+    if fcOn and lookInput ~= nil and input == lookInput then
         yaw = yaw - input.Delta.X * 0.004
         pitch = math.clamp(pitch - input.Delta.Y * 0.004, -1.5, 1.5)
     end
 end)
+UIS.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then rmbDown = true end
+end)
 UIS.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then rmbDown = false end
     if input == lookInput then lookInput = nil end
 end)
 
 RS.RenderStepped:Connect(function(dt)
     if not fcOn then return end
     cam.CameraType = Enum.CameraType.Scriptable
+
+    -- Putar kamera di PC (klik kanan + geser, atau langsung kalau game sudah mengunci mouse)
+    if rmbDown then
+        UIS.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+    else
+        UIS.MouseBehavior = prevBehavior
+    end
+    if rmbDown or prevBehavior ~= Enum.MouseBehavior.Default then
+        local d = UIS:GetMouseDelta()
+        yaw = yaw - d.X * 0.004
+        pitch = math.clamp(pitch - d.Y * 0.004, -1.5, 1.5)
+    end
+
     local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
     local move = hum and hum.MoveDirection or Vector3.zero
     local v = (up or UIS:IsKeyDown(Enum.KeyCode.E)) and 1 or 0
