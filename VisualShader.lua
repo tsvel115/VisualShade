@@ -177,12 +177,30 @@ local upBtn  = mkBtn("▲", {1, -60}, {0.5, -48})
 local dnBtn  = mkBtn("▼", {1, -60}, {0.5, 0})
 spdBtn.Visible, upBtn.Visible, dnBtn.Visible = false, false, false
 
+-- Area putar kamera (setengah layar kanan, hanya aktif saat freecam menyala)
+local lookInput = nil
+local pad = Instance.new("Frame")
+pad.Size = UDim2.new(0.5, 0, 1, 0)
+pad.Position = UDim2.new(0.5, 0, 0, 0)
+pad.BackgroundTransparency = 1
+pad.Active = true
+pad.ZIndex = 0
+pad.Visible = false
+pad.Parent = sg
+pad.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.Touch and not lookInput then
+        lookInput = input
+    end
+end)
+
 local function setFreecam(on)
     fcOn = on
     local char = plr.Character
     local hrp = char and char:FindFirstChild("HumanoidRootPart")
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     spdBtn.Visible, upBtn.Visible, dnBtn.Visible = on, on, on
+    pad.Visible = on
+    lookInput = nil
     if on then
         pos = cam.CFrame.Position
         pitch, yaw = cam.CFrame:ToOrientation()
@@ -210,23 +228,19 @@ upBtn.InputEnded:Connect(function() up = false end)
 dnBtn.InputBegan:Connect(function(i) if isPress(i) then down = true end end)
 dnBtn.InputEnded:Connect(function() down = false end)
 
-local function overMenu(p)
-    if not sf.Visible then return false end
-    local a, z = sf.AbsolutePosition, sf.AbsoluteSize
-    return p.X >= a.X and p.X <= a.X + z.X and p.Y >= a.Y and p.Y <= a.Y + z.Y
-end
-
--- Putar kamera: klik kanan + geser (PC) / geser layar (HP)
-UIS.InputChanged:Connect(function(input, gpe)
-    if not fcOn or uiDrag then return end
+-- Putar kamera: klik kanan + geser (PC) / geser setengah layar kanan (HP)
+UIS.InputChanged:Connect(function(input)
+    if not fcOn then return end
     local mouseLook = input.UserInputType == Enum.UserInputType.MouseMovement
         and UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
-    local touchLook = input.UserInputType == Enum.UserInputType.Touch
-        and not gpe and not overMenu(input.Position)
+    local touchLook = lookInput ~= nil and input == lookInput
     if mouseLook or touchLook then
         yaw = yaw - input.Delta.X * 0.004
         pitch = math.clamp(pitch - input.Delta.Y * 0.004, -1.5, 1.5)
     end
+end)
+UIS.InputEnded:Connect(function(input)
+    if input == lookInput then lookInput = nil end
 end)
 
 RS.RenderStepped:Connect(function(dt)
