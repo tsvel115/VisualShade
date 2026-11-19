@@ -16,20 +16,94 @@ end
 
 local cc     = get("ColorCorrectionEffect", Lighting)
 local bloom  = get("BloomEffect", Lighting)
-local dof    = get("DepthOfFieldEffect", Lighting)
+local dof = Lighting:FindFirstChild("TestDOF")
+    or (cam and cam:FindFirstChild("TestDOF"))
+    or Instance.new("DepthOfFieldEffect")
+dof.Name = "TestDOF"
+dof.Parent = dof.Parent or Lighting
 local rays   = get("SunRaysEffect", Lighting)
 local atm    = get("Atmosphere", Lighting)
 local clouds = get("Clouds", workspace.Terrain)
 
+-- Pastikan efek aktif, dan matikan efek duplikat bawaan game yang bisa menimpa
+for _, e in ipairs(Lighting:GetChildren()) do
+    if (e:IsA("ColorCorrectionEffect") and e ~= cc)
+    or (e:IsA("BloomEffect") and e ~= bloom)
+    or (e:IsA("SunRaysEffect") and e ~= rays) then
+        e.Enabled = false
+    end
+end
+cc.Enabled, bloom.Enabled, rays.Enabled = true, true, true
+
+-- DOF: instance sendiri, nilai awal langsung terlihat (dekat tajam, jauh blur)
+local DOF_DEF = {far = 0.8, near = 0, focus = 20, radius = 10}
+local dofParentMode = (dof.Parent == Lighting) and "Lighting" or "Camera"
+local dofLock = true
+
+local function dofTarget()
+    return dofParentMode == "Camera" and workspace.CurrentCamera or Lighting
+end
+
+local dofVals = {far = DOF_DEF.far, near = DOF_DEF.near, focus = DOF_DEF.focus, radius = DOF_DEF.radius}
+
+local function setDOF(far, near, focus, radius)
+    dofVals.far, dofVals.near, dofVals.focus, dofVals.radius = far, near, focus, radius
+    dof.Enabled = true
+    dof.FarIntensity = far
+    dof.NearIntensity = near
+    dof.FocusDistance = focus
+    dof.InFocusRadius = radius
+end
+
+local function otherDOFs()
+    local list = {}
+    for _, p in ipairs({Lighting, workspace.CurrentCamera}) do
+        for _, e in ipairs(p:GetChildren()) do
+            if e:IsA("DepthOfFieldEffect") and e ~= dof then
+                table.insert(list, e)
+            end
+        end
+    end
+    return list
+end
+
+local function killOtherDOFs()
+    for _, e in ipairs(otherDOFs()) do e.Enabled = false end
+end
+
+setDOF(DOF_DEF.far, DOF_DEF.near, DOF_DEF.focus, DOF_DEF.radius)
+killOtherDOFs()
+
+-- Mode kunci: terapkan ulang tiap frame kalau game menimpa efek
+RS.Heartbeat:Connect(function()
+    if not dofLock then return end
+    if dof.Parent ~= dofTarget() then dof.Parent = dofTarget() end
+    setDOF(dofVals.far, dofVals.near, dofVals.focus, dofVals.radius)
+    killOtherDOFs()
+end)
+
 local S = {}
-local function add(name, min, max, o, p)
-    table.insert(S, {name, min, max, function() return o[p] end, function(v) o[p] = v end})
+local saved = {} -- nilai slider yang sudah kamu atur (dipakai ulang setelah ganti map)
+
+-- Objek diambil saat dipakai (bukan disimpan), supaya tetap benar kalau efeknya dibuat ulang
+local getObj = {
+    cc     = function() return cc end,
+    bloom  = function() return bloom end,
+    rays   = function() return rays end,
+    atm    = function() return atm end,
+    clouds = function() return clouds end,
+    light  = function() return Lighting end,
+}
+
+local function add(name, min, max, key, p)
+    local f = getObj[key]
+    table.insert(S, {name, min, max, function() return f()[p] end, function(v) f()[p] = v end})
 end
 
 -- Warna
-add("Saturation", -1, 2, cc, "Saturation")
-add("Contrast", -1, 1, cc, "Contrast")
-add("Brightness", -1, 1, cc, "Brightness")
+add("Saturation", -1, 2, "cc", "Saturation")
+add("Contrast", -1, 1, "cc", "Contrast")
+add("Brightness", -1, 1, "cc", "Brightness")
 for _, ch in ipairs({"R", "G", "B"}) do
     table.insert(S, {"Tint " .. ch, 0, 1,
         function() return cc.TintColor[ch] end,
@@ -40,28 +114,37 @@ for _, ch in ipairs({"R", "G", "B"}) do
 end
 
 -- Matahari & cahaya
-add("Time of Day", 0, 24, Lighting, "ClockTime")
-add("Sun Brightness", 0, 10, Lighting, "Brightness")
-add("Exposure", -3, 3, Lighting, "ExposureCompensation")
-add("Sun Glare", 0, 10, atm, "Glare")
-add("Sun Rays", 0, 1, rays, "Intensity")
-add("Rays Spread", 0, 1, rays, "Spread")
-add("Bloom", 0, 3, bloom, "Intensity")
-add("Bloom Size", 0, 56, bloom, "Size")
-add("Bloom Threshold", 0, 4, bloom, "Threshold")
+add("Time of Day", 0, 24, "light", "ClockTime")
+add("Sun Brightness", 0, 10, "light", "Brightness")
+add("Exposure", -3, 3, "light", "ExposureCompensation")
+add("Sun Glare", 0, 10, "atm", "Glare")
+add("Sun Rays", 0, 1, "rays", "Intensity")
+add("Rays Spread", 0, 1, "rays", "Spread")
+add("Bloom", 0, 3, "bloom", "Intensity")
+add("Bloom Size", 0, 56, "bloom", "Size")
+add("Bloom Threshold", 0, 4, "bloom", "Threshold")
 
 -- DOF
-add("DOF Far", 0, 1, dof, "FarIntensity")
-add("DOF Near", 0, 1, dof, "NearIntensity")
-add("DOF Focus Dist", 0, 500, dof, "FocusDistance")
-add("DOF Radius", 0, 200, dof, "InFocusRadius")
+local function addDOF(name, min, max, key, prop)
+    table.insert(S, {name, min, max,
+        function() return dof[prop] end,
+        function(v)
+            dofVals[key] = v
+            dof.Enabled = true
+            dof[prop] = v
+        end})
+end
+addDOF("DOF Far", 0, 1, "far", "FarIntensity")
+addDOF("DOF Near", 0, 1, "near", "NearIntensity")
+addDOF("DOF Focus Dist", 0, 300, "focus", "FocusDistance")
+addDOF("DOF Radius", 0, 100, "radius", "InFocusRadius")
 
 -- Fog & awan
-add("Fog Density", 0, 1, atm, "Density")
-add("Fog Haze", 0, 10, atm, "Haze")
-add("Fog Offset", 0, 1, atm, "Offset")
-add("Cloud Cover", 0, 1, clouds, "Cover")
-add("Cloud Density", 0, 1, clouds, "Density")
+add("Fog Density", 0, 1, "atm", "Density")
+add("Fog Haze", 0, 10, "atm", "Haze")
+add("Fog Offset", 0, 1, "atm", "Offset")
+add("Cloud Cover", 0, 1, "clouds", "Cover")
+add("Cloud Density", 0, 1, "clouds", "Density")
 
 -- GUI
 local sg = Instance.new("ScreenGui")
@@ -102,6 +185,7 @@ UIS.InputBegan:Connect(function(input, gpe)
 end)
 
 -- Slider
+local refreshers = {}
 for i, s in ipairs(S) do
     local name, min, max, getv, setv = unpack(s)
     local y = 10 + (i - 1) * 44
@@ -129,11 +213,15 @@ for i, s in ipairs(S) do
     local function set(alpha, apply)
         alpha = math.clamp(alpha, 0, 1)
         local v = min + (max - min) * alpha
-        if apply then setv(v) end
+        if apply then
+            setv(v)
+            saved[name] = v
+        end
         fill.Size = UDim2.new(alpha, 0, 1, 0)
         label.Text = string.format("%s: %.2f", name, v)
     end
     set((getv() - min) / (max - min), false)
+    table.insert(refreshers, function() set((getv() - min) / (max - min), false) end)
 
     local dragging = false
     local function fromInput(input)
@@ -163,6 +251,139 @@ for i, s in ipairs(S) do
         end
     end)
 end
+
+-- Tombol DOF (di bagian bawah menu)
+local function refreshAll()
+    for _, f in ipairs(refreshers) do f() end
+end
+
+local function mkPanelBtn(text, x, y, w)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, w, 0, 30)
+    b.Position = UDim2.new(0, x, 0, y)
+    b.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    b.TextColor3 = Color3.new(1, 1, 1)
+    b.TextSize = 12
+    b.Text = text
+    b.Parent = sf
+    return b
+end
+
+local by = #S * 44 + 14
+local hdr = Instance.new("TextLabel")
+hdr.Size = UDim2.new(1, -20, 0, 16)
+hdr.Position = UDim2.new(0, 10, 0, by)
+hdr.BackgroundTransparency = 1
+hdr.TextColor3 = Color3.fromRGB(180, 220, 255)
+hdr.TextSize = 12
+hdr.TextXAlignment = Enum.TextXAlignment.Left
+hdr.Text = "Pengaturan DOF"
+hdr.Parent = sf
+
+local testBtn = mkPanelBtn("Tes Blur MAX", 10, by + 22, 100)
+testBtn.MouseButton1Click:Connect(function()
+    setDOF(1, 1, 0, 0)
+    refreshAll()
+end)
+
+local resetBtn = mkPanelBtn("Reset DOF", 118, by + 22, 100)
+resetBtn.MouseButton1Click:Connect(function()
+    setDOF(DOF_DEF.far, DOF_DEF.near, DOF_DEF.focus, DOF_DEF.radius)
+    refreshAll()
+end)
+
+local parentBtn = mkPanelBtn("Parent: " .. dofParentMode, 10, by + 58, 100)
+parentBtn.MouseButton1Click:Connect(function()
+    dofParentMode = (dofParentMode == "Lighting") and "Camera" or "Lighting"
+    dof.Parent = dofTarget()
+    setDOF(dofVals.far, dofVals.near, dofVals.focus, dofVals.radius)
+    parentBtn.Text = "Parent: " .. dofParentMode
+end)
+
+local lockBtn = mkPanelBtn("Kunci: ON", 118, by + 58, 100)
+lockBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 60)
+lockBtn.MouseButton1Click:Connect(function()
+    dofLock = not dofLock
+    lockBtn.Text = "Kunci: " .. (dofLock and "ON" or "OFF")
+    lockBtn.BackgroundColor3 = dofLock and Color3.fromRGB(0, 120, 60) or Color3.fromRGB(50, 50, 50)
+end)
+
+local killBtn = mkPanelBtn("Matikan DOF lain", 10, by + 94, 208)
+killBtn.MouseButton1Click:Connect(function()
+    killOtherDOFs()
+    setDOF(dofVals.far, dofVals.near, dofVals.focus, dofVals.radius)
+end)
+
+sf.CanvasSize = UDim2.new(0, 0, 0, by + 134)
+
+-- ===== Tahan banting saat ganti map =====
+-- Game sering menghapus/mengganti efek di Lighting saat ganti map. Script ini
+-- membuat ulang efeknya dan menerapkan lagi nilai slider yang sudah kamu atur.
+local function ensureEffects()
+    if not (cc and cc.Parent == Lighting) then cc = get("ColorCorrectionEffect", Lighting) end
+    if not (bloom and bloom.Parent == Lighting) then bloom = get("BloomEffect", Lighting) end
+    if not (rays and rays.Parent == Lighting) then rays = get("SunRaysEffect", Lighting) end
+    if not (atm and atm.Parent == Lighting) then atm = get("Atmosphere", Lighting) end
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    if terrain and not (clouds and clouds.Parent == terrain) then
+        clouds = get("Clouds", terrain)
+    end
+    if not (dof and dof.Parent == dofTarget()) then
+        local c = workspace.CurrentCamera
+        dof = Lighting:FindFirstChild("TestDOF")
+            or (c and c:FindFirstChild("TestDOF"))
+            or Instance.new("DepthOfFieldEffect")
+        dof.Name = "TestDOF"
+        dof.Parent = dofTarget()
+    end
+    cc.Enabled, bloom.Enabled, rays.Enabled = true, true, true
+end
+
+local function reapplySaved()
+    for _, s in ipairs(S) do
+        local v = saved[s[1]]
+        if v ~= nil then pcall(s[5], v) end
+    end
+end
+
+local function killDupes()
+    for _, e in ipairs(Lighting:GetChildren()) do
+        if (e:IsA("ColorCorrectionEffect") and e ~= cc)
+        or (e:IsA("BloomEffect") and e ~= bloom)
+        or (e:IsA("SunRaysEffect") and e ~= rays) then
+            e.Enabled = false
+        end
+    end
+end
+
+local busy = false
+local function maintain()
+    if busy then return end
+    busy = true
+    pcall(function()
+        ensureEffects()
+        reapplySaved()
+        setDOF(dofVals.far, dofVals.near, dofVals.focus, dofVals.radius)
+        if dofLock then
+            killOtherDOFs()
+            killDupes()
+        end
+    end)
+    busy = false
+end
+
+task.spawn(function()
+    while sg.Parent do
+        maintain()
+        task.wait(0.25)
+    end
+end)
+Lighting.ChildRemoved:Connect(function() task.defer(maintain) end)
+Lighting.ChildAdded:Connect(function() task.defer(maintain) end)
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+    cam = workspace.CurrentCamera
+    task.defer(maintain)
+end)
 
 -- FREECAM
 local fcOn = false
